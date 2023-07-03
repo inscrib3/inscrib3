@@ -1,0 +1,14 @@
+diff --git a/node_modules/@cmdcode/tapscript/package.json b/node_modules/@cmdcode/tapscript/package.json
+index 2eb2c61..523d630 100644
+--- a/node_modules/@cmdcode/tapscript/package.json
++++ b/node_modules/@cmdcode/tapscript/package.json
+@@ -5,8 +5,8 @@
+   "type": "module",
+   "main": "./dist/main.js",
+   "unpkg": "./dist/bundle.min.js",
+-  "types": "./dist/types/index.d.ts",
+   "exports": {
++    "types": "./dist/types/index.d.ts",
+     "import": "./dist/module.js",
+     "require": "./dist/main.js"
+   },
