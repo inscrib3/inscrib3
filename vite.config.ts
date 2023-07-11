@@ -1,14 +1,10 @@
-import { resolve } from 'path';
-import { defineConfig } from 'vite';
-import dts from 'vite-plugin-dts';
+import { defineConfig } from "vite"
+import { viteSingleFile } from "vite-plugin-singlefile"
+// import viteCompression from 'vite-plugin-compression'
 
 export default defineConfig({
-  build: {
-    lib: {
-      entry: resolve(__dirname, 'src/index.ts'),
-      name: 'inscrib3',
-      fileName: 'inscrib3',
-    },
-  },
-  plugins: [dts()],
-});
+	plugins: [viteSingleFile()], // viteCompression()
+	build: {
+		outDir: "inscrib3",
+	}
+})

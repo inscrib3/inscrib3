@@ -1,71 +1,137 @@
 import { KeyPair, Noble } from "@cmdcode/crypto-utils"
 import { Address, Script, Signer, Tap, Tx } from "@cmdcode/tapscript"
+import { Buffer } from "buffer"
 
 type RunParams = {
     log: (message: string) => void,
     address: string,
-    mimetype: string,
-    text: string,
+    mimetype?: string,
+    text?: string,
+    files?: File[],
     padding?: number,
     tip?: number,
     tippingAddress: string,
+    privkey?: string,
 }
 
-const bytesToHex = (bytes: Uint8Array) => {
+export const bytesToHex = (bytes: Uint8Array) => {
     return bytes.reduce((str, byte) => str + byte.toString(16).padStart(2, "0"), "")
 }
 
-const privkey = bytesToHex(Noble.utils.randomPrivateKey())
+export const encodeBase64 = (file: File): Promise<string> => {
+    return new Promise(function (resolve) {
+        let imgReader = new FileReader();
+        imgReader.onloadend = function () {
+            resolve(imgReader!.result!.toString());
+        }
+        imgReader.readAsDataURL(file);
+    });
+}
+
+const hexString = (buffer: ArrayBuffer) => {
+    const byteArray = new Uint8Array(buffer)
+    const hexCodes = [...byteArray].map(value => {
+        return value.toString(16).padStart(2, '0')
+    })
+
+    return '0x' + hexCodes.join('')
+}
+
+const fileToArrayBuffer = async (file: File): Promise<string | ArrayBuffer | null> => {
+    return new Promise(function (resolve) {
+        const reader = new FileReader()
+        const readFile = function () {
+            const buffer = reader.result
+            resolve(buffer)
+        }
+
+        reader.addEventListener('load', readFile)
+        reader.readAsArrayBuffer(file)
+    })
+}
+
+async function bufferToSha256(buffer: ArrayBuffer) {
+    return window.crypto.subtle.digest('SHA-256', buffer)
+}
+
+const arrayBufferToBuffer = (ab: ArrayBuffer) => {
+    // ab byte length to buffer
+    var buffer = new Buffer(ab.byteLength)
+    var view = new Uint8Array(ab)
+    for (var i = 0; i < buffer.length; ++i) {
+        buffer[i] = view[i]
+    }
+    return buffer
+}
+
+export const fileToSha256Hex = async (file: File) => {
+    const buffer = await fileToArrayBuffer(file)
+    const hash = await bufferToSha256(arrayBufferToBuffer(buffer as ArrayBuffer))
+    return hexString(hash)
+}
+
+export const base64ToHex = (str: string) => {
+    const raw = atob(str)
+    let result = '';
+    for (let i = 0; i < raw.length; i++) {
+        const hex = raw.charCodeAt(i).toString(16);
+        result += (hex.length === 2 ? hex : '0' + hex);
+    }
+    return result.toLowerCase();
+}
+
+const _privkey = bytesToHex(Noble.utils.randomPrivateKey())
 let pushing = false
 
-const isPushing = async () => {
+export const isPushing = async () => {
     while (pushing) {
         await sleep(10)
     }
 }
 
-const textToHex = (text: string) => {
+export const textToHex = (text: string) => {
     var encoder = new TextEncoder().encode(text)
     return [...new Uint8Array(encoder)]
         .map(x => x.toString(16).padStart(2, "0"))
         .join("")
 }
 
-const buf2hex = (buffer: ArrayBuffer) => {
+export const buf2hex = (buffer: ArrayBuffer) => {
     return [...new Uint8Array(buffer)]
         .map(x => x.toString(16).padStart(2, '0'))
         .join('')
 }
 
-const getEconomyFeeRate = async () => {
+export const getFastestFeeRate = async () => {
     try {
         const res = await fetch(`https://mempool.space/api/v1/fees/recommended`)
         const json = await res.json()
-        return json.fastestFee
+        if (json.halfHourFee < 6) return 6
+        return json.halfHourFee
     } catch (e) {
         throw new Error("Mempool connection failed for address")
     }
 }
 
-const hexToBytes = (hex: string) => {
+export const hexToBytes = (hex: string) => {
     const bytes = hex.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16))
     return bytes ? Uint8Array.from(bytes) : new Uint8Array()
 }
 
-const satsToBitcoin = (sats: number) => {
+export const satsToBitcoin = (sats: number) => {
     if (sats >= 100000000) sats = sats * 10
     let string = String(sats).padStart(8, "0").slice(0, -9) + "." + String(sats).padStart(8, "0").slice(-9)
     if (string.substring(0, 1) == ".") string = "0" + string
     return string
 }
 
-const sleep = (ms: number) => {
+export const sleep = (ms: number) => {
     return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-const addressOnceHadMoney = async (address: string, includeMempool?: boolean) => {
+export const addressOnceHadMoney = async (address: string, includeMempool?: boolean) => {
     try {
-        const res = await fetch("https://blockstream.info/api/address/" + address)
+        const res = await fetch("https://mempool.space/api/address/" + address)
         const json = await res.json()
         if (json.chain_stats.tx_count > 0 || (includeMempool && json.mempool_stats.tx_count > 0)) {
             return true
@@ -77,7 +143,7 @@ const addressOnceHadMoney = async (address: string, includeMempool?: boolean) =>
     }
 }
 
-const loopTilAddressReceivesMoney = async (address: string, includeMempool?: boolean) => {
+export const loopTilAddressReceivesMoney = async (address: string, includeMempool?: boolean) => {
     let itReceivedMoney = false
 
     async function isDataSetYet(data_i_seek: boolean) {
@@ -105,13 +171,13 @@ const loopTilAddressReceivesMoney = async (address: string, includeMempool?: boo
     return returnable
 }
 
-const addressReceivedMoneyInThisTx = async (address: string): Promise<[string, number, number]> => {
+export const addressReceivedMoneyInThisTx = async (address: string): Promise<[string, number, number]> => {
     let txid = ""
     let vout = 0
     let amt = 0
 
     try {
-        const res = await fetch("https://blockstream.info/api/address/" + address + "/txs")
+        const res = await fetch("https://mempool.space/api/address/" + address + "/txs")
         const json = await res.json()
         json.forEach((tx: any) => {
             tx.vout.forEach((output: { value: number, scriptpubkey_address: string }, index: number) => {
@@ -129,17 +195,22 @@ const addressReceivedMoneyInThisTx = async (address: string): Promise<[string, n
     return [txid, vout, amt]
 }
 
-const pushBTCpmt = async (rawtx: string) => {
-    let txid = ''
+export const pushBTCpmt = async (rawtx: string) => {
+    let txid: string | undefined
 
     try {
-        const res = await fetch("https://blockstream.info/api/tx", {
+        const res = await fetch("https://mempool.space/api/tx", {
             method: "POST",
             body: rawtx,
         })
+
         txid = await res.text()
+
+        if (res.status !== 200) {
+            throw new Error(txid)
+        }
     } catch(e) {
-        console.error(e)
+        throw new Error((e as Error).message)
     }
 
     return txid
@@ -192,13 +263,15 @@ export const inscribe = async (log: (msg: string) => void, seckey: KeyPair, toAd
     console.dir(redeemtx, {depth: null})
 
     let rawtx2 = Tx.encode(redeemtx).hex
-    let _txid2
+    let _txid2: string | undefined
 
     // since we don't know any mempool space api rate limits, we will be careful with spamming
     await isPushing()
     pushing = true
-    _txid2 = await pushBTCpmt( rawtx2 )
-    await sleep(1000)
+    while (!_txid2) {
+        _txid2 = await pushBTCpmt( rawtx2 )
+        await sleep(2000)
+    }
     pushing = false
 
     if(_txid2.includes('descendant'))
@@ -212,12 +285,21 @@ export const inscribe = async (log: (msg: string) => void, seckey: KeyPair, toAd
     try {
         JSON.parse(_txid2)
     } catch (e) {
-        log(`Ordinals explorer (after tx '${_txid2}' confirmation): https://ordinals.com/inscription/${_txid2}i0`)
+        log(`${_txid2}i0`)
     }
+}
+
+export type ParsedFile = {
+    text?: string;
+    name: string;
+    hex: string;
+    mimetype: string | undefined;
+    sha256: string;
 }
 
 export const run = async (params: RunParams) => {
     let address: string
+    let files: ParsedFile[] = []
 
     try {
         address = Address.p2tr.decode(params.address).hex
@@ -232,15 +314,57 @@ export const run = async (params: RunParams) => {
         throw new Error("Mempool connection failed for address")
     }
 
-    const file = {
-        text: JSON.stringify(params.text),
-        name: textToHex(params.text),
-        hex: textToHex(params.text),
-        mimetype: params.mimetype,
-        sha256: ''
+    if (params.text && params.mimetype) {
+        files.push({
+            text: params.text,
+            name: textToHex(params.text),
+            hex: textToHex(params.text),
+            mimetype: params.mimetype,
+            sha256: ''
+        })
+    } else if (params.files) {
+        if (params.privkey) {
+            files = params.files as unknown as ParsedFile[];
+        } else {
+            for (let file of params.files) {
+                if (file.size >= 350000) {
+                    alert("One of your desired inscriptions exceeds the maximum of 350kb.")
+                    break;
+                }
+                let mimetype = file.type;
+                if (mimetype.includes("text/plain")) {
+                    mimetype += ";charset=utf-8";
+                }
+                const b64 = await encodeBase64(file);
+                let base64 = b64.substring(b64.indexOf("base64,") + 7);
+                let hex = base64ToHex(base64);
+    
+                let sha256 = await fileToSha256Hex(file);
+    
+                files.push({
+                    name: file.name,
+                    hex: hex,
+                    mimetype: mimetype,
+                    sha256: sha256.replace('0x', '')
+                });
+            }
+        }
     }
 
     let padding = params.padding || 546
+
+    let privkey = params.privkey || _privkey
+
+    localStorage.setItem('pending', JSON.stringify({
+        files,
+        address: params.address,
+        mimetype: params.mimetype,
+        text: params.text,
+        padding,
+        tip: params.tip,
+        tippingAddress: params.tippingAddress,
+        privkey,
+    }))
 
     let seckey = new KeyPair(privkey)
     let pubkey = seckey.pub.rawX
@@ -281,11 +405,13 @@ export const run = async (params: RunParams) => {
     }
 
     let total_fee = 0
+    let inscriptions = []
 
-    let feerate = await getEconomyFeeRate()
+    let feerate = await getFastestFeeRate()
 
     let base_size = 160
 
+    for (let file of files) {
         const hex = file.hex
         const data = hexToBytes(hex)
         const mimetype = ec.encode(file.mimetype)
@@ -328,38 +454,33 @@ export const run = async (params: RunParams) => {
         let fee = feerate * txsize
         total_fee += fee
 
-        const inscription = 
-            {
-                leaf: leaf,
-                tapkey: tapkey,
-                cblock: cblock,
-                inscriptionAddress: inscriptionAddress,
-                txsize: txsize,
-                fee: fee,
-                script: script_backup,
-                script_orig: script
-            }
-    
+        inscriptions.push({
+            leaf: leaf,
+            tapkey: tapkey,
+            cblock: cblock,
+            inscriptionAddress: inscriptionAddress,
+            txsize: txsize,
+            fee: fee,
+            script: script_backup,
+            script_orig: script
+        })
+    }
 
-    // we are covering 2 times the same outputs, once for seeder, once for the inscribers
-    let total_fees = total_fee + ( 203 * feerate ) + base_size + padding
+    let total_fees = total_fee + ( ( 69 + ( ( inscriptions.length + 1 ) * 2 ) * 31 + 10 ) * feerate ) + (base_size * inscriptions.length) + (padding * inscriptions.length);
 
     let fundingAddress = Address.p2tr.encode(init_tapkey)
 
-    const tip = params.tip || 5000
+    const tip = params.tip || 1000
 
     if(!isNaN(tip) && tip >= 500)
     {
         total_fees += (50 * feerate) + tip
     }
 
-    params.log(`Please send ${satsToBitcoin(total_fees)} btc to ${fundingAddress} to fund the inscription`)
+    // round up to nearest 1000 sats
+    console.log(total_fees, Math.ceil(total_fees / 1000) * 1000)
 
-    let overhead = total_fees - total_fee - padding - tip
-
-    if(isNaN(overhead)) {
-        overhead = 0
-    }
+    params.log(`Please send ${satsToBitcoin(Math.ceil(total_fees / 1000) * 1000)} btc to ${fundingAddress} to fund the inscription`)
 
     await loopTilAddressReceivesMoney(fundingAddress, true)
     await sleep(2000)
@@ -370,16 +491,18 @@ export const run = async (params: RunParams) => {
     let vout = txinfo[1]
     let amt = txinfo[2]
 
-    params.log(`Funding transaction ${txid} confirmed, waiting for inscription to be confirmed...`)
+    params.log(`Do not close browser, '${txid}' is confirmed, waiting for inscription to be confirmed...`)
 
     let outputs = []
 
+    for (let inscription of inscriptions) {
         outputs.push(
             {
                 value: padding + inscription.fee,
                 scriptPubKey: [ 'OP_1', inscription.tapkey ]
             }
         )
+    }
 
     if(!isNaN(tip) && tip >= 500) {
         outputs.push(
@@ -406,7 +529,33 @@ export const run = async (params: RunParams) => {
     init_redeemtx.vin[0].witness = [ init_sig.hex, init_script, init_cblock ]
 
     let rawtx = Tx.encode(init_redeemtx).hex
-    await pushBTCpmt(rawtx)
+    console.log('rawtx', hexToBytes(rawtx))
+    let pushing = true
 
-    inscribe(params.log, seckey, address, inscription)
+    while (pushing) {
+        try {
+            await pushBTCpmt(rawtx)
+            pushing = false
+        } catch (e) {
+            console.error(e)
+            await sleep(2000)
+        }
+    }
+
+    for (let inscription of inscriptions) {
+        await inscribe(params.log, seckey, address, inscription)
+    }
+
+    localStorage.removeItem('pending')
+}
+
+export const pending = (log: (message: string) => void) => {
+    const pending = localStorage.getItem('pending')
+
+    if (pending) {
+        const parsed = JSON.parse(pending)
+        if (parsed) {
+            run({ log, ...parsed })
+        }
+    }
 }
