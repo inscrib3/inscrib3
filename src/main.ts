@@ -16,6 +16,8 @@ const bytesToSize = (bytes: number) => {
 
 const compress = <HTMLInputElement>document.getElementById("compress")!;
 
+const network = <HTMLInputElement>document.getElementById("mainnet")!;
+
 filesInput.addEventListener("change", async () => {
   if (!filesInput.files || filesInput.files.length === 0) return;
 
@@ -81,6 +83,7 @@ document.getElementById("run")!.addEventListener("click", () => {
       "bc1psupdj48keuw4s2zwmf456h8l2zvh66kcj858rdunvf0490ldj2uqskmta4",
     files,
     tip: 1000,
+    network: network.checked ? "mainnet" : "testnet",
   });
 });
 

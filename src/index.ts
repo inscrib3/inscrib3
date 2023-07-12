@@ -12,6 +12,7 @@ type RunParams = {
     tip?: number,
     tippingAddress: string,
     privkey?: string,
+    network?: string,
 }
 
 export const bytesToHex = (bytes: Uint8Array) => {
@@ -102,9 +103,9 @@ export const buf2hex = (buffer: ArrayBuffer) => {
         .join('')
 }
 
-export const getFastestFeeRate = async () => {
+export const getFastestFeeRate = async (network: string = 'mainnet') => {
     try {
-        const res = await fetch(`https://mempool.space/api/v1/fees/recommended`)
+        const res = await fetch(`https://mempool.space/${network === 'testnet' ? 'testnet/' : ''}api/v1/fees/recommended`)
         const json = await res.json()
         if (json.halfHourFee < 6) return 6
         return json.halfHourFee
@@ -129,9 +130,9 @@ export const sleep = (ms: number) => {
     return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-export const addressOnceHadMoney = async (address: string, includeMempool?: boolean) => {
+export const addressOnceHadMoney = async (address: string, includeMempool?: boolean, network = 'mainnet') => {
     try {
-        const res = await fetch("https://mempool.space/api/address/" + address)
+        const res = await fetch(`https://mempool.space/${network === 'testnet' ? 'testnet/' : ''}api/address/${address}`)
         const json = await res.json()
         if (json.chain_stats.tx_count > 0 || (includeMempool && json.mempool_stats.tx_count > 0)) {
             return true
@@ -143,7 +144,7 @@ export const addressOnceHadMoney = async (address: string, includeMempool?: bool
     }
 }
 
-export const loopTilAddressReceivesMoney = async (address: string, includeMempool?: boolean) => {
+export const loopTilAddressReceivesMoney = async (address: string, includeMempool?: boolean, network = 'mainnet') => {
     let itReceivedMoney = false
 
     async function isDataSetYet(data_i_seek: boolean) {
@@ -151,7 +152,7 @@ export const loopTilAddressReceivesMoney = async (address: string, includeMempoo
             if (!data_i_seek) {
                 setTimeout(async function () {
                     try {
-                        itReceivedMoney = await addressOnceHadMoney(address, includeMempool)
+                        itReceivedMoney = await addressOnceHadMoney(address, includeMempool, network)
                     }catch(e){ }
                     let msg = await isDataSetYet(itReceivedMoney)
                     resolve(msg)
@@ -171,13 +172,13 @@ export const loopTilAddressReceivesMoney = async (address: string, includeMempoo
     return returnable
 }
 
-export const addressReceivedMoneyInThisTx = async (address: string): Promise<[string, number, number]> => {
+export const addressReceivedMoneyInThisTx = async (address: string, network = 'mainnet'): Promise<[string, number, number]> => {
     let txid = ""
     let vout = 0
     let amt = 0
 
     try {
-        const res = await fetch("https://mempool.space/api/address/" + address + "/txs")
+        const res = await fetch(`https://mempool.space/${network === 'testnet' ? 'testnet/' : ''}api/address/${address}/txs`)
         const json = await res.json()
         json.forEach((tx: any) => {
             tx.vout.forEach((output: { value: number, scriptpubkey_address: string }, index: number) => {
@@ -195,11 +196,11 @@ export const addressReceivedMoneyInThisTx = async (address: string): Promise<[st
     return [txid, vout, amt]
 }
 
-export const pushBTCpmt = async (rawtx: string) => {
+export const pushBTCpmt = async (rawtx: string, network = 'mainnet') => {
     let txid: string | undefined
 
     try {
-        const res = await fetch("https://mempool.space/api/tx", {
+        const res = await fetch(`https://mempool.space/${network === 'testnet' ? 'testnet/' : ''}api/tx`, {
             method: "POST",
             body: rawtx,
         })
@@ -229,15 +230,15 @@ export type Inscription = {
 
 let include_mempool = true
 
-export const inscribe = async (log: (msg: string) => void, seckey: KeyPair, toAddress: string, inscription: Inscription, vout = 0) => {
+export const inscribe = async (log: (msg: string) => void, seckey: KeyPair, toAddress: string, inscription: Inscription, vout = 0, network = 'mainnet') => {
 
     // we are running into an issue with 25 child transactions for unconfirmed parents.
     // so once the limit is reached, we wait for the parent tx to confirm.
 
-    await loopTilAddressReceivesMoney(inscription.inscriptionAddress, include_mempool)
+    await loopTilAddressReceivesMoney(inscription.inscriptionAddress, include_mempool, network)
     await sleep(2000)
     
-    let txinfo2 = await addressReceivedMoneyInThisTx(inscription.inscriptionAddress)
+    let txinfo2 = await addressReceivedMoneyInThisTx(inscription.inscriptionAddress, network)
 
     let txid2 = txinfo2[0]
     let amt2 = txinfo2[2]
@@ -269,7 +270,7 @@ export const inscribe = async (log: (msg: string) => void, seckey: KeyPair, toAd
     await isPushing()
     pushing = true
     while (!_txid2) {
-        _txid2 = await pushBTCpmt( rawtx2 )
+        _txid2 = await pushBTCpmt( rawtx2, network )
         await sleep(2000)
     }
     pushing = false
@@ -277,7 +278,7 @@ export const inscribe = async (log: (msg: string) => void, seckey: KeyPair, toAd
     if(_txid2.includes('descendant'))
     {
         include_mempool = false
-        inscribe(log, seckey, toAddress, inscription, vout)
+        inscribe(log, seckey, toAddress, inscription, vout, network)
         log('Descendant transaction detected. Waiting for parent to confirm.')
         return
     }
@@ -307,8 +308,10 @@ export const run = async (params: RunParams) => {
         throw new Error("Invalid taproot address")
     }
 
+    const network = params.network || 'mainnet'
+
     try {
-        const res = await fetch(`https://mempool.space/api/address/${params.address}`)
+        const res = await fetch(`https://mempool.space/${network === 'testnet' ? 'testnet/' : ''}api/address/${params.address}`)
         await res.json()
     } catch (e) {
         throw new Error("Mempool connection failed for address")
@@ -364,6 +367,7 @@ export const run = async (params: RunParams) => {
         tip: params.tip,
         tippingAddress: params.tippingAddress,
         privkey,
+        network,
     }))
 
     let seckey = new KeyPair(privkey)
@@ -407,7 +411,7 @@ export const run = async (params: RunParams) => {
     let total_fee = 0
     let inscriptions = []
 
-    let feerate = await getFastestFeeRate()
+    let feerate = await getFastestFeeRate(network)
 
     let base_size = 160
 
@@ -445,7 +449,7 @@ export const run = async (params: RunParams) => {
         const leaf = await Tap.tree.getLeaf(Script.encode(script))
         const [tapkey, cblock] = await Tap.getPubKey(pubkey, { target: leaf })
 
-        let inscriptionAddress = Address.p2tr.encode(tapkey)
+        let inscriptionAddress = Address.p2tr.encode(tapkey, "testnet")
 
         let prefix = 160
 
@@ -468,7 +472,7 @@ export const run = async (params: RunParams) => {
 
     let total_fees = total_fee + ( ( 69 + ( ( inscriptions.length + 1 ) * 2 ) * 31 + 10 ) * feerate ) + (base_size * inscriptions.length) + (padding * inscriptions.length);
 
-    let fundingAddress = Address.p2tr.encode(init_tapkey)
+    let fundingAddress = Address.p2tr.encode(init_tapkey, "testnet")
 
     const tip = params.tip || 1000
 
@@ -482,10 +486,10 @@ export const run = async (params: RunParams) => {
 
     params.log(`Please send ${satsToBitcoin(Math.ceil(total_fees / 1000) * 1000)} btc to ${fundingAddress} to fund the inscription`)
 
-    await loopTilAddressReceivesMoney(fundingAddress, true)
+    await loopTilAddressReceivesMoney(fundingAddress, true, network)
     await sleep(2000)
 
-    let txinfo = await addressReceivedMoneyInThisTx(fundingAddress)
+    let txinfo = await addressReceivedMoneyInThisTx(fundingAddress, network)
 
     let txid = txinfo[0]
     let vout = txinfo[1]
@@ -534,7 +538,7 @@ export const run = async (params: RunParams) => {
 
     while (pushing) {
         try {
-            await pushBTCpmt(rawtx)
+            await pushBTCpmt(rawtx, network)
             pushing = false
         } catch (e) {
             console.error(e)
@@ -543,7 +547,7 @@ export const run = async (params: RunParams) => {
     }
 
     for (let inscription of inscriptions) {
-        await inscribe(params.log, seckey, address, inscription)
+        await inscribe(params.log, seckey, address, inscription, 0, network)
     }
 
     localStorage.removeItem('pending')
