@@ -3,11 +3,11 @@ import { Address, Script, Signer, Tap, Tx } from "@cmdcode/tapscript"
 import { Buffer } from "buffer"
 
 type RunParams = {
-    log: (message: string) => void,
+    log: (message: string, isTx?: boolean) => void,
     address: string,
     mimetype?: string,
     text?: string,
-    files?: File[],
+    files?: ParsedFile[],
     padding?: number,
     tip?: number,
     tippingAddress: string,
@@ -230,7 +230,7 @@ export type Inscription = {
 
 let include_mempool = true
 
-export const inscribe = async (log: (msg: string) => void, seckey: KeyPair, toAddress: string, inscription: Inscription, vout = 0, network = 'mainnet') => {
+export const inscribe = async (log: (msg: string, isTx?: boolean) => void, seckey: KeyPair, toAddress: string, inscription: Inscription, vout = 0, network = 'mainnet') => {
 
     // we are running into an issue with 25 child transactions for unconfirmed parents.
     // so once the limit is reached, we wait for the parent tx to confirm.
@@ -286,8 +286,10 @@ export const inscribe = async (log: (msg: string) => void, seckey: KeyPair, toAd
     try {
         JSON.parse(_txid2)
     } catch (e) {
-        log(`${_txid2}i0`)
+        log(`${_txid2}i0`, true)
     }
+
+    _txid2 = undefined
 }
 
 export type ParsedFile = {
@@ -296,6 +298,8 @@ export type ParsedFile = {
     hex: string;
     mimetype: string | undefined;
     sha256: string;
+    size?: number;
+    compressed?: boolean;
 }
 
 export const run = async (params: RunParams) => {
@@ -317,6 +321,8 @@ export const run = async (params: RunParams) => {
         throw new Error("Mempool connection failed for address")
     }
 
+    const pending = localStorage.getItem('pending')
+
     if (params.text && params.mimetype) {
         files.push({
             text: params.text,
@@ -326,49 +332,28 @@ export const run = async (params: RunParams) => {
             sha256: ''
         })
     } else if (params.files) {
-        if (params.privkey) {
-            files = params.files as unknown as ParsedFile[];
-        } else {
-            for (let file of params.files) {
-                if (file.size >= 350000) {
-                    alert("One of your desired inscriptions exceeds the maximum of 350kb.")
-                    break;
-                }
-                let mimetype = file.type;
-                if (mimetype.includes("text/plain")) {
-                    mimetype += ";charset=utf-8";
-                }
-                const b64 = await encodeBase64(file);
-                let base64 = b64.substring(b64.indexOf("base64,") + 7);
-                let hex = base64ToHex(base64);
-    
-                let sha256 = await fileToSha256Hex(file);
-    
-                files.push({
-                    name: file.name,
-                    hex: hex,
-                    mimetype: mimetype,
-                    sha256: sha256.replace('0x', '')
-                });
-            }
-        }
+        files = params.files
+    } else {
+        throw new Error("No files to inscribe")
     }
 
     let padding = params.padding || 546
 
     let privkey = params.privkey || _privkey
 
-    localStorage.setItem('pending', JSON.stringify({
-        files,
-        address: params.address,
-        mimetype: params.mimetype,
-        text: params.text,
-        padding,
-        tip: params.tip,
-        tippingAddress: params.tippingAddress,
-        privkey,
-        network,
-    }))
+    if (pending === null) {
+        localStorage.setItem('pending', JSON.stringify({
+            files,
+            address: params.address,
+            mimetype: params.mimetype,
+            text: params.text,
+            padding,
+            tip: params.tip,
+            tippingAddress: params.tippingAddress,
+            privkey,
+            network,
+        }))
+    }
 
     let seckey = new KeyPair(privkey)
     let pubkey = seckey.pub.rawX
@@ -546,11 +531,12 @@ export const run = async (params: RunParams) => {
         }
     }
 
-    for (let inscription of inscriptions) {
-        await inscribe(params.log, seckey, address, inscription, 0, network)
+    for (let i = 0; i < inscriptions.length; i++) {
+        await inscribe(params.log, seckey, address, inscriptions[i], i, network)
     }
 
     localStorage.removeItem('pending')
+    localStorage.removeItem('files')
 }
 
 export const pending = (log: (message: string) => void) => {

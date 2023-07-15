@@ -1,11 +1,11 @@
-import { pending, run } from "./index";
+import { ParsedFile, base64ToHex, encodeBase64, fileToSha256Hex, pending, run } from "./index";
 import { compressSync, decompressSync } from "fflate";
 
 const filesInput = <HTMLInputElement>document.getElementById("files")!;
 const previewer = document.getElementById("previewer")!;
 const previewerCount = document.getElementById("previewer-count")!;
 
-let files: File[] = [];
+let files: ParsedFile[] = localStorage.getItem("files") !== null ? JSON.parse(localStorage.getItem("files")!) : [];
 
 const bytesToSize = (bytes: number) => {
 	  const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
@@ -17,6 +17,36 @@ const bytesToSize = (bytes: number) => {
 const compress = <HTMLInputElement>document.getElementById("compress")!;
 
 const network = <HTMLInputElement>document.getElementById("mainnet")!;
+
+const showFiles = (parsedFiles: ParsedFile[]) => {
+  previewer.innerHTML = "";
+  previewerCount.innerText = `${files.length} files to inscribe`;
+
+  for (let file of parsedFiles) {
+    const div = document.createElement("div");
+    div.innerHTML = `<a id="${file.name}" href="#" class="remove">[x]</a> - ${file.name} - ${file.size && bytesToSize(file.size)} bytes - ${file.mimetype}<hr />`;
+    previewer.appendChild(div);
+  }
+
+  const remove = document.querySelectorAll<HTMLButtonElement>(".remove");
+
+  for (let button of remove) {
+    button.addEventListener("click", (e) => {
+      e.preventDefault();
+      const id = button.id;
+      const file = files.find((f) => f.name === id);
+      if (!file) return;
+      files = files.filter((f) => f.name !== id);
+      previewer.removeChild(button.parentElement!);
+      previewerCount.innerText = `${files.length} files to inscribe`;
+      localStorage.setItem("files", JSON.stringify(files));
+    });
+  }
+};
+
+if (files.length > 0) {
+  showFiles(files);
+}
 
 filesInput.addEventListener("change", async () => {
   if (!filesInput.files || filesInput.files.length === 0) return;
@@ -38,46 +68,62 @@ filesInput.addEventListener("change", async () => {
   // clear input
   filesInput.value = "";
 
-  files = [...files, ...newFiles];
-
-  previewerCount.innerText = `${files.length} files to inscribe`;
+  const parsedFiles: ParsedFile[] = [...files];
 
   for (let file of newFiles) {
-    const div = document.createElement("div");
-    div.innerHTML = `<a id="${file.name}" href="#" class="remove">[x]</a> - ${file.name} - ${bytesToSize(file.size)} bytes - ${file.type}<hr />`;
-    previewer.appendChild(div);
-  }
+    if (file.size >= 350000) {
+        alert("One of your desired inscriptions exceeds the maximum of 350kb.")
+        break;
+    }
+    let mimetype = file.type;
+    if (mimetype.includes("text/plain")) {
+        mimetype += ";charset=utf-8";
+    }
+    const b64 = await encodeBase64(file);
+    let base64 = b64.substring(b64.indexOf("base64,") + 7);
+    let hex = base64ToHex(base64);
 
-  const remove = document.querySelectorAll<HTMLButtonElement>(".remove");
+    let sha256 = await fileToSha256Hex(file);
 
-  for (let button of remove) {
-    button.addEventListener("click", (e) => {
-      e.preventDefault();
-      const id = button.id;
-      const file = files.find((f) => f.name === id);
-      if (!file) return;
-      files = files.filter((f) => f.name !== id);
-      previewer.removeChild(button.parentElement!);
-      previewerCount.innerText = `${files.length} files to inscribe`;
+    parsedFiles.push({
+        name: file.name,
+        hex: hex,
+        mimetype: mimetype,
+        sha256: sha256.replace('0x', ''),
+        size: file.size,
+        compressed: compress.checked
     });
   }
+
+  files = parsedFiles;
+
+  localStorage.setItem("files", JSON.stringify(parsedFiles));
+
+  showFiles(parsedFiles)
 });
+
+const showLog = (message: string, isTx?: boolean) => {
+  const log = document.getElementById("log")!;
+      if (isTx) {
+        log.innerHTML = ''
+        const result = document.getElementById("result")!;
+        if (files[0].compressed) {
+          result.innerHTML += `Tx ID: ${message.replace('i0', '')}; after tx confirmation you can view it on our <a target="_blank" href="https://ordinals.com/content/7b9cdb349d8a75152834437f6453b235d1884c188f4428d69db4b26fd3048ccbi0?q=${message}">experimental viewer</a>` + "<br><br>";
+        } else {
+          result.innerHTML += `Tx ID: ${message.replace('i0', '')}; after tx confirmation you can view it on <a target="_blank" href="https://ordinals.com/content/${message}">ordinals content</a>` + "<br><br>";
+        }
+        files.shift();
+        localStorage.setItem("files", JSON.stringify(files));
+      } else {
+        log.innerHTML = message + "<br>";
+      }
+}
 
 document.getElementById("run")!.addEventListener("click", () => {
   const address = <HTMLInputElement>document.getElementById("taproot_address")!;
 
   run({
-    log: (message: string) => {
-      const log = document.getElementById("log")!;
-      if (message.includes('i0') && !compress.checked) {
-        log.innerHTML += `Tx ID: ${message.replace('i0', '')}; after tx confirmation you can view it: <a target="_blank" href="https://ordinals.com/content/${message}">https://ordinals.com/content/${message}</a><br>`;
-        return
-      } else if (message.includes('i0') && compress.checked) {
-        log.innerHTML += `Tx ID: ${message.replace('i0', '')}; after tx confirmation you can view it on our experimental viewer: <a target="_blank" href="https://ordinals.com/content/7b9cdb349d8a75152834437f6453b235d1884c188f4428d69db4b26fd3048ccbi0?q=${message}">https://ordinals.com/content/7b9cdb349d8a75152834437f6453b235d1884c188f4428d69db4b26fd3048ccbi0?q=${message}</a>` + "<br>";
-        return
-      }
-      log.innerHTML = message + "<br>";
-    },
+    log: showLog,
     address: address.value.trim(),
     tippingAddress:
       "bc1psupdj48keuw4s2zwmf456h8l2zvh66kcj858rdunvf0490ldj2uqskmta4",
@@ -85,11 +131,6 @@ document.getElementById("run")!.addEventListener("click", () => {
     tip: 1000,
     network: network.checked ? "mainnet" : "testnet",
   });
-});
-
-pending((message: string) => {
-  const log = document.getElementById("log")!;
-  log.innerHTML = message + "<br>";
 });
 
 document.getElementById("x")!.addEventListener("click", (e) => {
@@ -126,6 +167,8 @@ const main = async () => {
       return;
     }
   }
+
+  pending(showLog);
 };
 
 main().catch((err) => console.error(err));
