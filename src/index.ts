@@ -449,7 +449,7 @@ export const run = async (params: RunParams) => {
         const leaf = await Tap.tree.getLeaf(Script.encode(script))
         const [tapkey, cblock] = await Tap.getPubKey(pubkey, { target: leaf })
 
-        let inscriptionAddress = Address.p2tr.encode(tapkey, "testnet")
+        let inscriptionAddress = Address.p2tr.encode(tapkey, params.network === 'testnet' ? 'testnet' : 'main')
 
         let prefix = 160
 
