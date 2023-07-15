@@ -472,7 +472,7 @@ export const run = async (params: RunParams) => {
 
     let total_fees = total_fee + ( ( 69 + ( ( inscriptions.length + 1 ) * 2 ) * 31 + 10 ) * feerate ) + (base_size * inscriptions.length) + (padding * inscriptions.length);
 
-    let fundingAddress = Address.p2tr.encode(init_tapkey, "testnet")
+    let fundingAddress = Address.p2tr.encode(init_tapkey, network === 'testnet' ? 'testnet' : 'main')
 
     const tip = params.tip || 1000
 
